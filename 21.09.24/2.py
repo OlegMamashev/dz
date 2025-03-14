@@ -1,5 +1,0 @@
-text=str(input())
-a=text.split()
-a.reverse()
-text=' '.join(a)
-print(text.capitalize())
