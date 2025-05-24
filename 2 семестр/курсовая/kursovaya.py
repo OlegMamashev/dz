@@ -77,10 +77,15 @@ class InputCoords(QWidget):
         self.layout.addWidget(self.next_text)
 
         self.ok_button = QPushButton("Да")
+        self.ok_button.clicked.connect(self.ok_clicked())
         self.layout.addWidget(self.ok_button)
 
         self.cancel_button = QPushButton("Нет")
         self.layout.addWidget(self.cancel_button)
+
+    def ok_clicked(self):
+        pass
+        # отправление self.coords обратно в gui
 
 
 class Gui(QMainWindow):
