@@ -1,6 +1,6 @@
 import sys
-from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QLineEdit, QWidget, QLabel, QPushButton
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QLineEdit, QWidget, QLabel, QPushButton
 
 
 class Figure:
@@ -46,11 +46,24 @@ class Board:
     def get_figure_pos(self):
         return [figure.position for figure in self.figures]
 
-# class BoardGui:
-#     def __init__(self):
-#         super().__init__()
-#         self.setWindowTitle("First combination")
-#         self.setFixedSize(QSize(500, 500))
+
+class Main:
+    def __init__(self, place_fig_num):
+        self.place_fig_num = place_fig_num
+        self.combination_number = 0
+
+    def place_fig(self):
+        pass
+
+
+
+
+class BoardGui:
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("First combination")
+        self.setFixedSize(QSize(500, 500))
+        self.layout = QVBoxLayout(self)
 
 
 class InputCoords(QWidget):
@@ -58,6 +71,7 @@ class InputCoords(QWidget):
         super().__init__()
         self.n = number_of_placed_figures
         self.coords = []
+        self.coords_output = []
         self.layout = QVBoxLayout(self)
 
         self.input_coords_text = QLabel("Введите координаты:")
@@ -77,15 +91,19 @@ class InputCoords(QWidget):
         self.layout.addWidget(self.next_text)
 
         self.ok_button = QPushButton("Да")
-        self.ok_button.clicked.connect(self.ok_clicked())
+        self.ok_button.clicked.connect(self.ok_clicked)
         self.layout.addWidget(self.ok_button)
 
         self.cancel_button = QPushButton("Нет")
         self.layout.addWidget(self.cancel_button)
 
     def ok_clicked(self):
-        pass
-        # отправление self.coords обратно в gui
+        coords = []
+        for coord in self.coords:
+            coord_text = coord.text().strip().split()
+            coords.append((coord_text[0], coord_text[1]))
+        self.coords_output = coords
+        self.close()
 
 
 class Gui(QMainWindow):
@@ -93,6 +111,8 @@ class Gui(QMainWindow):
         super().__init__()
 
         self.create_b = None
+        self.draw_b = None
+        self.placed_fig_coords = None
 
         self.setWindowTitle("Chess")
         self.setFixedSize(QSize(400, 300))
@@ -121,18 +141,30 @@ class Gui(QMainWindow):
         self.layout.addWidget(self.input_placed_fig)
 
         self.create_board_button = QPushButton("Создать доску")
-        self.create_board_button.clicked.connect(self.create_board)
+        self.create_board_button.clicked.connect(self.create_board_clicked)
         self.layout.addWidget(self.create_board_button)
 
         self.draw_board_button = QPushButton("Нарисовать доску")
+        self.draw_board_button.clicked.connect(self.draw_board_clicked)
         self.layout.addWidget(self.draw_board_button)
 
         self.exit_button = QPushButton("Выход")
+        self.exit_button.clicked.connect(self.exit_clicked)
         self.layout.addWidget(self.exit_button)
 
-    def create_board(self):
+    def create_board_clicked(self):
         self.create_b = InputCoords(int(self.input_placed_fig.text()))
         self.create_b.show()
+
+    def draw_board_clicked(self):
+        if self.create_b.coords_output:
+            self.placed_fig_coords = self.create_b.coords_output
+
+        self.draw_b = BoardGui()
+        self.draw_b.show()
+
+    def exit_clicked(self):
+        pass
 
 
 if __name__ == '__main__':
