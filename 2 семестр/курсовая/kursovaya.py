@@ -1,5 +1,5 @@
 import sys
-from PySide6.QtCore import QSize, Qt, Signal, QThreadPool, Slot, QRunnable
+from PySide6.QtCore import QSize, Qt, Signal, QThreadPool, Slot, QRunnable, QObject
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QLineEdit,
                                QWidget, QLabel, QPushButton, QGridLayout)
 
@@ -75,17 +75,22 @@ class Board:
                 self.block_coords.update(figure.movements())
 
 
+class Signals(QObject):
+    first_combination_signal = Signal(list, set)
+
+
 class Main(QRunnable):
+
     def __init__(self, place_fig_num: int, board_size: int, placed_fig: list | None):
         super().__init__()
 
+        self.signals = Signals()
         self.file = None
         self.place_fig_num = place_fig_num
         self.board_size = board_size
         self.placed_fig = placed_fig
         self.board = Board(board_size)
         self.combination_number = 0
-        self.first_combination = None
 
     def write_output(self, file):
         figures_list = self.board.get_figure_pos()
@@ -95,12 +100,14 @@ class Main(QRunnable):
             else:
                 file.write(f'{figures_list[i]}\n')
 
-    def place_fig(self):
+    def run(self):
 
         # Добавляем расставленные фигуры
         if self.placed_fig:
             for i in self.placed_fig:
                 self.board.add_placed_figure(Figure(i, self.board_size))
+
+        self.file = open('output.txt', 'w')
 
         def counting(start_y, start_x):
             if len(self.board.figures) == self.place_fig_num:
@@ -108,15 +115,11 @@ class Main(QRunnable):
                 # print(self.board.get_figure_pos())
 
                 if self.combination_number == 1:
-                    self.first_combination = BoardGui(self.board_size, self.board.get_figure_pos(),
-                                                      self.board.get_block_coords())
-                    self.first_combination.show()
-
-                    while not self.first_combination.button_clicked:
-                        QApplication.processEvents()
-                    self.file = open('output.txt', 'w')
+                    self.signals.first_combination_signal.emit(self.board.get_figure_pos(),
+                                                               self.board.get_block_coords())
 
                 self.write_output(self.file)
+                return
 
             for y in range(start_y, self.board_size):
                 for x in range(start_x if y == start_y else 0, self.board_size):
@@ -124,7 +127,8 @@ class Main(QRunnable):
                         counting(y, x)
                         self.board.remove_figure()
         counting(0, 0)
-        self.file.close()
+        if self.file:
+            self.file.close()
 
 
 class BoardGui(QWidget):
@@ -215,6 +219,7 @@ class Gui(QMainWindow):
         super().__init__()
 
         self.create_b = None
+        self.draw_b = None
         self.main = None
         self.placed_fig_coords = None
         self.thread_pool = QThreadPool()
@@ -266,8 +271,13 @@ class Gui(QMainWindow):
             self.placed_fig_coords = self.create_b.coords_output
 
         self.main = Main(int(self.input_place_fig.text()), int(self.input_size.text()), self.placed_fig_coords)
-        # self.main.place_fig()
-        self.thread_pool.start(self.main.place_fig())
+        self.main.signals.first_combination_signal.connect(self.show_first_combination)
+        self.thread_pool.start(self.main)
+
+    @Slot(list, set)
+    def show_first_combination(self, figures, block_coords):
+        self.draw_b = BoardGui(int(self.input_size.text()), figures, block_coords)
+        self.draw_b.show()
 
     def exit_clicked(self):
         pass
