@@ -1,6 +1,7 @@
 import sys
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QLineEdit, QWidget, QLabel, QPushButton
+from PySide6.QtCore import QSize, Qt, Signal, QThreadPool, Slot, QRunnable
+from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QLineEdit,
+                               QWidget, QLabel, QPushButton, QGridLayout)
 
 
 class Figure:
@@ -74,16 +75,25 @@ class Board:
                 self.block_coords.update(figure.movements())
 
 
-class Main:
-    def __init__(self, place_fig_num, board_size, placed_fig):
+class Main(QRunnable):
+    def __init__(self, place_fig_num: int, board_size: int, placed_fig: list | None):
+        super().__init__()
+
+        self.file = None
         self.place_fig_num = place_fig_num
         self.board_size = board_size
         self.placed_fig = placed_fig
         self.board = Board(board_size)
         self.combination_number = 0
+        self.first_combination = None
 
-    def write_output(self):
-        pass
+    def write_output(self, file):
+        figures_list = self.board.get_figure_pos()
+        for i in range(0, len(figures_list)):
+            if i != len(figures_list) - 1:
+                file.write(f'{figures_list[i]} ')
+            else:
+                file.write(f'{figures_list[i]}\n')
 
     def place_fig(self):
 
@@ -94,12 +104,19 @@ class Main:
 
         def counting(start_y, start_x):
             if len(self.board.figures) == self.place_fig_num:
-                self.write_output()
-                print(self.board.get_figure_pos())
+                self.combination_number += 1
+                # print(self.board.get_figure_pos())
 
-                # Придумать как свзять рисовку первой комбинации
-                # if self.combination_number == 0:
-                #     pass
+                if self.combination_number == 1:
+                    self.first_combination = BoardGui(self.board_size, self.board.get_figure_pos(),
+                                                      self.board.get_block_coords())
+                    self.first_combination.show()
+
+                    while not self.first_combination.button_clicked:
+                        QApplication.processEvents()
+                    self.file = open('output.txt', 'w')
+
+                self.write_output(self.file)
 
             for y in range(start_y, self.board_size):
                 for x in range(start_x if y == start_y else 0, self.board_size):
@@ -107,14 +124,50 @@ class Main:
                         counting(y, x)
                         self.board.remove_figure()
         counting(0, 0)
+        self.file.close()
 
 
-class BoardGui:
-    def __init__(self):
+class BoardGui(QWidget):
+    def __init__(self, board_size, placed_fig, block_coords):
         super().__init__()
+        # self.board_size = board_size
+        # self.placed_fig = placed_fig
+        # self.block_coords = block_coords
+        self.button_clicked = False
+        self.squares = []
+
         self.setWindowTitle("First combination")
-        self.setFixedSize(QSize(500, 500))
         self.layout = QVBoxLayout(self)
+
+        self.grid_layout_widget = QWidget()
+        self.grid_layout = QGridLayout(self.grid_layout_widget)
+        self.layout.addWidget(self.grid_layout_widget)
+
+        self.next_button = QPushButton("Записать в файл")
+        self.next_button.clicked.connect(self.next_button_clicked)
+        self.layout.addWidget(self.next_button)
+
+        self.exit_button = QPushButton("Выйти")
+        self.layout.addWidget(self.exit_button)
+
+        for x in range(board_size):
+            x_line = []
+            for y in range(board_size):
+                square = QLabel()
+                square.setFixedSize(20, 20)
+                square.setStyleSheet("background-color: white")
+                self.grid_layout.addWidget(square, x, y)
+                x_line.append(square)
+            self.squares.append(x_line)
+
+        for i in block_coords:
+            self.squares[i[0]][i[1]].setStyleSheet("background-color: blue")
+
+        for i in placed_fig:
+            self.squares[i[0]][i[1]].setStyleSheet("background-color: red")
+
+    def next_button_clicked(self):
+        self.button_clicked = True
 
 
 class InputCoords(QWidget):
@@ -152,7 +205,7 @@ class InputCoords(QWidget):
         coords = []
         for coord in self.coords:
             coord_text = coord.text().strip().split()
-            coords.append((coord_text[0], coord_text[1]))
+            coords.append((int(coord_text[0]), int(coord_text[1])))
         self.coords_output = coords
         self.close()
 
@@ -162,11 +215,12 @@ class Gui(QMainWindow):
         super().__init__()
 
         self.create_b = None
-        self.draw_b = None
+        self.main = None
         self.placed_fig_coords = None
+        self.thread_pool = QThreadPool()
 
         self.setWindowTitle("Chess")
-        self.setFixedSize(QSize(400, 300))
+        self.setFixedSize(QSize(400, 360))
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -208,21 +262,18 @@ class Gui(QMainWindow):
         self.create_b.show()
 
     def draw_board_clicked(self):
-        if self.create_b.coords_output:
+        if self.create_b:
             self.placed_fig_coords = self.create_b.coords_output
 
-        self.draw_b = BoardGui()
-        self.draw_b.show()
+        self.main = Main(int(self.input_place_fig.text()), int(self.input_size.text()), self.placed_fig_coords)
+        # self.main.place_fig()
+        self.thread_pool.start(self.main.place_fig())
 
     def exit_clicked(self):
         pass
 
 
 if __name__ == '__main__':
-
-    test = Main(1, 3, [(2, 2)])
-    test.place_fig()
-
     app = QApplication(sys.argv)
     gui = Gui()
     gui.show()
