@@ -1,14 +1,16 @@
 import sys
-from PySide6.QtCore import QSize, Qt, Signal, QThreadPool, Slot, QRunnable, QObject
-from PySide6.QtGui import QIntValidator
+from PySide6.QtCore import QSize, Qt, Signal, QThreadPool, Slot, QRunnable, QObject, QEventLoop
+from PySide6.QtGui import QIntValidator, QColor, QPainter
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QLineEdit,
-                               QWidget, QLabel, QPushButton, QGridLayout)
+                               QWidget, QLabel, QPushButton, QGridLayout, QGraphicsRectItem,
+                               QGraphicsView, QGraphicsScene, QMessageBox)
 
 
 class Figure:
     """
     Шахматная фигура
     """
+
     def __init__(self, position: tuple, board_size: int):
         """
 
@@ -42,6 +44,7 @@ class Board:
     """
     Управляет доской и расстановкой фигур на неё
     """
+
     def __init__(self, n: int):
         """
 
@@ -63,7 +66,6 @@ class Board:
             return False
         self.figures.append(figure)
         self.block_coords.add(figure.position)
-        # self.block_coords + figure.movements()
         self.block_coords.update(figure.movements())
         return True
 
@@ -98,6 +100,13 @@ class Board:
         """
         return [figure.position for figure in self.figures] + [figure.position for figure in self.placed_figures]
 
+    def get_initially_placed_figure_pos(self) -> list:
+        """
+        Получение расположения изначально стоящих фигур на доске
+        :return:
+        """
+        return [figure.position for figure in self.placed_figures]
+
     def get_block_coords(self) -> set:
         """
         Получение всех заблокированных позиций в виде множества
@@ -120,7 +129,9 @@ class Board:
 
 
 class Signals(QObject):
-    first_combination_signal = Signal(list, set)
+    first_combination_signal = Signal(list, list, set)
+    resume_signal = Signal()
+    finish_signal = Signal(int)
 
 
 class Main(QRunnable):
@@ -144,7 +155,14 @@ class Main(QRunnable):
         self.board_size = board_size
         self.placed_fig = placed_fig
         self.board = board
+        self.counting_f = None
+        self.wait = None
         self.combination_number = 0
+
+    def resume(self):
+        if self.wait:
+            self.wait = False
+            self.counting_f(0, 0)
 
     def write_output(self, file):
         """
@@ -169,7 +187,6 @@ class Main(QRunnable):
         if self.placed_fig:
             for i in self.placed_fig:
                 self.board.add_placed_figure(Figure(i, self.board_size))
-        print(self.board)
 
         def counting(start_y, start_x):
             """
@@ -181,12 +198,18 @@ class Main(QRunnable):
             """
             if len(self.board.figures) == self.place_fig_num:
                 self.combination_number += 1
-                # print(self.board.get_figure_pos())
 
+                # Первая комбинация
                 if self.combination_number == 1:
+                    self.wait = True
                     self.signals.first_combination_signal.emit(self.board.get_figure_pos(),
+                                                               self.board.get_initially_placed_figure_pos(),
                                                                self.board.get_block_coords())
-                    print('412')
+
+                    # Ожидание нажатия кнопки в BoardGui для продолжения
+                    loop = QEventLoop()
+                    self.signals.resume_signal.connect(loop.quit)
+                    loop.exec()
                     self.file = open('output.txt', 'w')
 
                 self.write_output(self.file)
@@ -197,35 +220,61 @@ class Main(QRunnable):
                     if self.board.add_figure(Figure((y, x), self.board_size)):
                         counting(y, x)
                         self.board.remove_figure()
+
+        self.counting_f = counting
         counting(0, 0)
         if self.file:
             self.file.close()
+
+        self.signals.finish_signal.emit(self.combination_number)
+
+
+class Cell(QGraphicsRectItem):
+    """
+    Графическая часть (квадрат), используемый для отрисовки первой комбинации
+    """
+    CELL_SIZE = 25
+    COLORS = {
+        'empty': QColor('white'),
+        'figure': QColor('green'),
+        'placed_figure': QColor('red'),
+        'block_coord': QColor('blue')
+    }
+
+    def __init__(self, x, y, cell_type):
+        super().__init__(x * self.CELL_SIZE, y * self.CELL_SIZE, self.CELL_SIZE, self.CELL_SIZE)
+        self.setBrush(self.COLORS[cell_type])
 
 
 class BoardGui(QWidget):
     """
     Отображает первую возможную комбинацию расстановки фигур
     Белый квадрат - пустая клетка
-    Красный квадрат - фигура
+    Красный квадрат - уже стоящая фигура
+    Зелёный квадрат - поставленная фигура
     Синий квадрат - место атаки
     """
-    def __init__(self, board_size: int, placed_fig, block_coords):
+
+    def __init__(self, board_size: int, placed_fig, initially_placed_fig, block_coords):
         """
 
         :param board_size: Размер шахматной доски
         :param placed_fig: Список с позициями фигур в кортеже
+        :param initially_placed_fig: Список с позициями изначально стоящих фигур в кортеже
         :param block_coords: Множество с заблокированными позициями в кортеже
         """
         super().__init__()
         self.button_clicked = False
-        self.squares = []
+        # self.squares = []
 
         self.setWindowTitle("First combination")
+        self.setWindowModality(Qt.ApplicationModal)
         self.layout = QVBoxLayout(self)
 
-        self.grid_layout_widget = QWidget()
-        self.grid_layout = QGridLayout(self.grid_layout_widget)
-        self.layout.addWidget(self.grid_layout_widget)
+        self.scene = QGraphicsScene()
+        self.view = QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.Antialiasing)
+        self.layout.addWidget(self.view)
 
         self.next_button = QPushButton("Записать в файл")
         self.next_button.clicked.connect(self.next_button_clicked)
@@ -235,24 +284,19 @@ class BoardGui(QWidget):
         self.exit_button.clicked.connect(self.exit_button_clicked)
         self.layout.addWidget(self.exit_button)
 
-        for x in range(board_size):
-            x_line = []
-            for y in range(board_size):
-                square = QLabel()
-                if board_size > 10:
-                    square.setFixedSize(20, 20)
+        for y in range(board_size):
+            for x in range(board_size):
+                if (y, x) in placed_fig:
+                    if (y, x) in initially_placed_fig:
+                        cell_type = 'placed_figure'
+                    else:
+                        cell_type = 'figure'
+                elif (y, x) in block_coords:
+                    cell_type = 'block_coord'
                 else:
-                    square.setFixedSize(40, 40)
-                square.setStyleSheet("background-color: white")
-                self.grid_layout.addWidget(square, x, y)
-                x_line.append(square)
-            self.squares.append(x_line)
-
-        for i in block_coords:
-            self.squares[i[0]][i[1]].setStyleSheet("background-color: blue")
-
-        for i in placed_fig:
-            self.squares[i[0]][i[1]].setStyleSheet("background-color: red")
+                    cell_type = 'empty'
+                cell = Cell(x, y, cell_type)
+                self.scene.addItem(cell)
 
     def next_button_clicked(self):
         self.button_clicked = True
@@ -265,6 +309,7 @@ class InputCoords(QWidget):
     """
     Окно для ввода координат уже стоящих фигур
     """
+
     def __init__(self, number_of_placed_figures: int, board_size: int):
         """
 
@@ -277,6 +322,8 @@ class InputCoords(QWidget):
         self.board = None
         self.coords = []
         self.coords_output = []
+
+        self.setWindowModality(Qt.ApplicationModal)
         self.layout = QVBoxLayout(self)
 
         self.input_coords_text = QLabel("Введите координаты:")
@@ -284,13 +331,16 @@ class InputCoords(QWidget):
 
         if self.n > 1:
             for coord in range(self.n):
+                label = QLabel(f"№{coord + 1}")
+                self.layout.addWidget(label)
+
                 coord = QLineEdit()
-                # coord.textChanged.connect(self.check_coord_inputs)
+                coord.textChanged.connect(self.check_coord_inputs)
                 self.layout.addWidget(coord)
                 self.coords.append(coord)
         else:
             coord = QLineEdit()
-            # coord.textChanged.connect(self.check_coord_inputs)
+            coord.textChanged.connect(self.check_coord_inputs)
             self.layout.addWidget(coord)
             self.coords.append(coord)
 
@@ -299,34 +349,63 @@ class InputCoords(QWidget):
 
         self.ok_button = QPushButton("Да")
         self.ok_button.clicked.connect(self.ok_clicked)
-        # self.ok_button.setEnabled(False)
+        self.ok_button.setEnabled(False)
         self.layout.addWidget(self.ok_button)
 
         self.cancel_button = QPushButton("Нет")
         self.cancel_button.clicked.connect(self.cancel_clicked)
         self.layout.addWidget(self.cancel_button)
 
-    # def check_coord_inputs(self, coord):
-    #     if coord != '':
-    #         k = coord.split()
-    #         if len(k) > 2:
-    #             coord = f'{k[0]} {k[1]}'
-    #
-    #         if len(k) == 2:
-    #             if int(k[0]) > self.board_size:
-    #                 coord = f'20 {k[1]}'
-    #             if int(k[1]) > self.board_size:
-    #                 coord = f'{k[0]} 20'
-    #             self.ok_button.setEnabled(True)
-    #             return coord
+    def check_coord_inputs(self):
+        """
+        Проверяет поля с текстом на правильность (2 числа через пробел, не большие размера доски)
+        :return:
+        """
+        check = True
+        for coord in self.coords:
+            text = coord.text().strip()
+            coord.setStyleSheet('')
+
+            parts = text.split()
+            if len(parts) != 2:
+                check = False
+                break
+
+            if parts[0].isdigit() and parts[1].isdigit():
+                if not(0 <= int(parts[0]) < self.board_size and 0 <= int(parts[1]) < self.board_size):
+                    check = False
+                    coord.setStyleSheet('background-color: red')
+            else:
+                check = False
+                coord.setStyleSheet('background-color: red')
+                break
+        self.ok_button.setEnabled(check)
+
     def ok_clicked(self):
         coords = []
         for coord in self.coords:
             coord_text = coord.text().strip().split()
             coords.append((int(coord_text[0]), int(coord_text[1])))
-        self.coords_output = coords
-        self.board = Board(self.board_size)
-        self.close()
+
+        # Проверка на перекрытие друг друга фигур
+        n = 1
+        test_flag = True
+        test_board = Board(self.board_size)
+        for coord in coords:
+            if test_board.add_figure(Figure(coord, self.board_size)):
+                n += 1
+            else:
+                test_flag = False
+                self.warning_message(n)
+                break
+
+        if test_flag:
+            self.coords_output = coords
+            self.board = Board(self.board_size)
+            self.close()
+
+    def warning_message(self, count):
+        QMessageBox.information(self, "Ошибка", f"Поле №{count} находится под атакой другой фигуры.")
 
     def cancel_clicked(self):
         self.close()
@@ -336,6 +415,7 @@ class Gui(QMainWindow):
     """
     Главное окно программы
     """
+
     def __init__(self):
         super().__init__()
 
@@ -366,7 +446,7 @@ class Gui(QMainWindow):
         self.layout.addWidget(self.input_place_fig_text)
 
         self.input_place_fig = QLineEdit()
-        self.input_place_fig.setValidator(QIntValidator(0, 20*20-1))
+        self.input_place_fig.setValidator(QIntValidator(0, 20 * 20 - 1))
         self.input_place_fig.textChanged.connect(self.check_inputs)
         self.layout.addWidget(self.input_place_fig)
 
@@ -374,7 +454,7 @@ class Gui(QMainWindow):
         self.layout.addWidget(self.input_placed_fig_text)
 
         self.input_placed_fig = QLineEdit()
-        self.input_placed_fig.setValidator(QIntValidator(0, 20*20-1))
+        self.input_placed_fig.setValidator(QIntValidator(0, 20 * 20 - 1))
         self.layout.addWidget(self.input_placed_fig)
 
         self.create_board_button = QPushButton("Создать доску")
@@ -399,11 +479,15 @@ class Gui(QMainWindow):
         if self.input_size.text() != '' and self.input_place_fig.text() != '':
             if int(self.input_size.text()) > 20:
                 self.input_size.setText('20')
-            if int(self.input_place_fig.text()) > 20*20-1:
-                self.input_place_fig.setText(f'{20*20-1}')
+            if int(self.input_place_fig.text()) > 20 * 20 - 1:
+                self.input_place_fig.setText(f'{20 * 20 - 1}')
             self.create_board_button.setEnabled(True)
 
     def create_board_clicked(self):
+        """
+        Кнопка запускает класс InputCoords, если есть уже стоящие фигуры, а также создает доску
+        :return:
+        """
         if self.input_placed_fig.text():
             self.create_b = InputCoords(int(self.input_placed_fig.text()), int(self.input_size.text()))
             self.create_b.show()
@@ -423,21 +507,25 @@ class Gui(QMainWindow):
                          self.placed_fig_coords, self.board)
 
         self.main.signals.first_combination_signal.connect(self.show_first_combination)
+        self.main.signals.finish_signal.connect(self.show_finish)
         self.thread_pool.start(self.main)
 
-    @Slot(list, set)
-    def show_first_combination(self, figures, block_coords):
+    @Slot(list, list, set)
+    def show_first_combination(self, figures, initially_placed_figures, block_coords):
         """
         Запускается при получении первой комбинации в Main и запускает BoardGui для её отображения
         :param figures: Список с позициями фигур в кортеже
+        :param initially_placed_figures: Список с изначально стоящими фигурами в кортеже
         :param block_coords: Множество с заблокированными позициями в кортеже
         :return:
         """
-        self.draw_b = BoardGui(int(self.input_size.text()), figures, block_coords)
+        self.draw_b = BoardGui(int(self.input_size.text()), figures, initially_placed_figures, block_coords)
         self.draw_b.show()
-        # print(self.draw_b.button_clicked)
-        # while not self.draw_b.button_clicked:
-        #     QApplication.processEvents()
+
+        self.draw_b.next_button.clicked.connect(self.main.signals.resume_signal.emit)
+
+    def show_finish(self, counts):
+        QMessageBox.information(self, "Завершено", f"Количество решений: {counts}")
 
     def exit_clicked(self):
         self.close()
