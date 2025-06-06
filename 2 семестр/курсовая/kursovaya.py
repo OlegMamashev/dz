@@ -2,7 +2,7 @@ import sys
 from PySide6.QtCore import QSize, Qt, Signal, QThreadPool, Slot, QRunnable, QObject, QEventLoop
 from PySide6.QtGui import QIntValidator, QColor, QPainter
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QLineEdit,
-                               QWidget, QLabel, QPushButton, QGridLayout, QGraphicsRectItem,
+                               QWidget, QLabel, QPushButton, QGraphicsRectItem,
                                QGraphicsView, QGraphicsScene, QMessageBox)
 
 
@@ -265,7 +265,6 @@ class BoardGui(QWidget):
         """
         super().__init__()
         self.button_clicked = False
-        # self.squares = []
 
         self.setWindowTitle("First combination")
         self.setWindowModality(Qt.ApplicationModal)
@@ -525,7 +524,10 @@ class Gui(QMainWindow):
         self.draw_b.next_button.clicked.connect(self.main.signals.resume_signal.emit)
 
     def show_finish(self, counts):
-        QMessageBox.information(self, "Завершено", f"Количество решений: {counts}")
+        if counts != 0:
+            QMessageBox.information(self, "Завершено", f"Количество решений: {counts}")
+        else:
+            QMessageBox.information(self, "Завершено", "Решений не было найдено")
 
     def exit_clicked(self):
         self.close()
