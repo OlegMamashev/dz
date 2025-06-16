@@ -39,7 +39,6 @@ class Figure:
                 coords.add((self.position[0] + i[0], self.position[1] + i[1]))
         return coords
 
-
 class Board:
     """
     Управляет доской и расстановкой фигур на неё
